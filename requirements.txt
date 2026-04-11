@@ -1,0 +1,26 @@
+# === Web Framework ===
+fastapi>=0.111.0         # Framework async con validación Pydantic integrada
+uvicorn[standard]>=0.29  # ASGI server para FastAPI
+
+# === Configuración ===
+pydantic-settings>=2.2   # Manejo type-safe de variables de entorno
+
+# === HTTP Async ===
+httpx>=0.27              # Cliente HTTP asíncrono para WP REST API
+
+# === Parseo HTML ===
+beautifulsoup4>=4.12     # Parseo de nodos de texto; NO se usa para garantizar identidad HTML
+lxml>=5.2                # Parser más rápido y preciso para BS4 en producción
+
+# === LLM Provider (MVP) ===
+google-genai>=1.0        # SDK oficial de Gemini (reemplaza al deprecado google-generativeai)
+
+# === Logging estructurado ===
+structlog>=24.1          # Logs en JSON con contexto enriquecido
+
+# === Utilidades ===
+python-dotenv>=1.0       # Carga .env en desarrollo local
+
+# === Testing ===
+pytest>=8.0              # Framework de tests
+pytest-asyncio>=0.23     # Soporte para tests con async/await
