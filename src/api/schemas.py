@@ -61,6 +61,13 @@ class ModifyPageResponse(BaseModel):
     Serialización directa de ModificationResult del dominio.
     original_content y proposed_content se incluyen para permitir
     review completo antes de publicar.
+
+    Campos de detección de builder:
+        builder_detected:     Qué builder fue identificado.
+        extraction_mode:      Qué estrategia de extracción se usó.
+        confidence:           Nivel de confianza de la detección (0.0-1.0).
+        publish_allowed:      Si el sistema puede publicar cambios reales.
+        publish_blocked_reason: Por qué está bloqueado (si aplica).
     """
 
     page_id: int
@@ -77,10 +84,17 @@ class ModifyPageResponse(BaseModel):
     warnings: list[str]
     errors: list[str]
     created_at: str
+    # ── Builder detection fields ───────────────────────────────────────────────
+    builder_detected: str = "unknown"
+    extraction_mode: str = "none"
+    confidence: float = 0.0
+    publish_allowed: bool = False
+    publish_blocked_reason: str = ""
 
     @classmethod
     def from_domain(cls, result: ModificationResult) -> ModifyPageResponse:
         """Converts a domain ModificationResult into an API response schema."""
+        report = result.extraction_report
         return cls(
             page_id=result.page_id,
             page_url=result.page_url,
@@ -96,7 +110,13 @@ class ModifyPageResponse(BaseModel):
             warnings=result.warnings,
             errors=result.errors,
             created_at=result.created_at.isoformat(),
+            builder_detected=report.builder_type.value,
+            extraction_mode=report.extraction_mode.value,
+            confidence=report.confidence,
+            publish_allowed=report.publish_allowed,
+            publish_blocked_reason=report.publish_blocked_reason,
         )
+
 
 
 class ErrorResponse(BaseModel):

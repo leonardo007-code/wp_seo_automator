@@ -10,6 +10,7 @@ from google.genai import types as genai_types
 
 from src.config.settings import Settings
 from src.domain.entities import EditableSegment
+from src.domain.exceptions import LLMProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +263,7 @@ class GeminiProvider:
                 if attempt < self._max_retries - 1:
                     await asyncio.sleep(2**attempt)
                 else:
-                    raise
+                    raise LLMProviderError(f"API Provider failed after {self._max_retries} attempts: {api_error}") from api_error
 
         # Should not reach here, but satisfies the type checker
         return segments

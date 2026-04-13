@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.config.settings import Settings
@@ -53,7 +53,7 @@ class LocalBackupRepository:
         page_dir = self._backup_dir / str(page_id)
         page_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         backup_file = page_dir / f"{timestamp}.json"
 
         payload = {

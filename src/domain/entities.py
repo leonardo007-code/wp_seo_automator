@@ -14,6 +14,69 @@ class ModificationStatus(str, Enum):
     DRY_RUN = "dry_run"
 
 
+class BuilderType(str, Enum):
+    """
+    Constructores de página de WordPress detectables.
+    GUTENBERG y CLASSIC son los únicos que soportan publicación directa.
+    Los builders de terceros requieren lógica específica por proveedor.
+    """
+    GUTENBERG = "gutenberg"        # Editor de bloques nativo de WordPress
+    CLASSIC = "classic"            # Editor clásico / TinyMCE
+    DIVI = "divi"                  # Divi Builder (Elegant Themes)
+    ELEMENTOR = "elementor"        # Elementor Page Builder
+    OXYGEN = "oxygen"              # Oxygen Builder
+    BREAKDANCE = "breakdance"      # Breakdance Builder
+    BRICKS = "bricks"              # Bricks Builder
+    UNKNOWN = "unknown"            # No detectado con certeza
+
+
+class ExtractionMode(str, Enum):
+    """
+    Estrategia de extracción usada en la operación.
+    Determina qué se puede hacer con el contenido extraído.
+    """
+    STANDARD = "standard"            # HTML puro → BeautifulSoup
+    DIVI_SHORTCODE = "divi_shortcode" # Parsing de shortcodes Divi
+    RENDERED_HTML = "rendered_html"   # GET público al URL renderizado
+    NONE = "none"                     # Sin extracción posible
+
+
+class PolicyDecision(str, Enum):
+    """
+    Decisión de la política de publicación para un builder detectado.
+
+    ALLOW:              Edición + publicación directa segura.
+    ALLOW_WITH_CAUTION: Edición + publicación, con advertencias explícitas.
+    ANALYSIS_ONLY:      Solo análisis y dry_run; publicación bloqueada.
+    BLOCKED:            No se puede extraer ni analizar de forma útil.
+    """
+    ALLOW = "allow"
+    ALLOW_WITH_CAUTION = "allow_caution"
+    ANALYSIS_ONLY = "analysis_only"
+    BLOCKED = "blocked"
+
+
+@dataclass
+class ExtractionReport:
+    """
+    Resumen de detección y extracción para una operación.
+    Se incluye en cada ModificationResult para dar transparencia al caller.
+    """
+    builder_type: BuilderType = BuilderType.UNKNOWN
+    extraction_mode: ExtractionMode = ExtractionMode.NONE
+    confidence: float = 0.0                   # 0.0 - 1.0
+    policy_decision: PolicyDecision = PolicyDecision.ANALYSIS_ONLY
+    publish_blocked_reason: str = ""          # Mensaje si publicación está bloqueada
+    detection_signals: list[str] = field(default_factory=list)  # Qué señales detectó
+
+    @property
+    def publish_allowed(self) -> bool:
+        return self.policy_decision in (
+            PolicyDecision.ALLOW,
+            PolicyDecision.ALLOW_WITH_CAUTION,
+        )
+
+
 @dataclass
 class EditableSegment:
     """
@@ -128,5 +191,6 @@ class ModificationResult:
     proposed_content: str
     warnings: list[str]
     errors: list[str]
+    extraction_report: ExtractionReport = field(default_factory=ExtractionReport)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
