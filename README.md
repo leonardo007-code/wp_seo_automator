@@ -4,7 +4,7 @@ Sistema de automatización de contenido en WordPress con IA desacoplada.
 Modifica el texto de páginas WordPress usando Gemini (u otros LLMs) sin
 tocar shortcodes, bloques Gutenberg, scripts ni iframes.
 
-> **Estado actual:** Backend 100% funcional. 133+ tests pasando. Validado en dry_run.
+> **Estado actual (real):** Backend funcional para flujo `dry_run` con Gemini + WordPress REST API, con soporte operacional por modo para Classic/Gutenberg/Divi y análisis seguro para Elementor/Oxygen/Breakdance/Bricks.
 
 ---
 
@@ -35,10 +35,17 @@ POST /api/v1/modifications
   → Extract editable text segments
   → Transform segments via Gemini
   → Validate structural integrity
+  → Evaluate operation_mode (safe_apply | analysis_only | blocked_no_content)
   → [dry_run=true]  → Return result (NO publica nada)
-  → [dry_run=false] → Publish to WordPress
+  → [dry_run=false] → Publish only if policy allows it
   → Save audit log
 ```
+
+### Modos operativos
+
+- `safe_apply`: hay segmentos editables y publicación permitida (Classic/Gutenberg y Divi con cautela).
+- `analysis_only`: hay segmentos útiles para propuesta/diff, pero publicación bloqueada por seguridad (Elementor/Oxygen/Breakdance/Bricks o detección ambigua).
+- `blocked_no_content`: no se detectó contenido útil para editar con seguridad.
 
 ---
 
@@ -90,7 +97,7 @@ GEMINI_API_KEY=AIzaSy...
 GEMINI_MODEL=gemini-2.0-flash
 
 # === Comportamiento ===
-DRY_RUN_DEFAULT=true    # SIEMPRE en true hasta que valides el sistema
+DRY_RUN_DEFAULT=true    # Valor por defecto cuando el request omite dry_run
 
 # === Storage ===
 BACKUP_DIR=./backups
@@ -102,9 +109,7 @@ REQUEST_TIMEOUT_SECONDS=30
 MAX_RETRIES=3
 ```
 
-> ⚠️ **Regla de seguridad:** Deja `DRY_RUN_DEFAULT=true` y `"dry_run": true`
-> en los requests hasta que hayas validado el sistema. El servidor nunca publicará
-> cambios reales si `dry_run=true` está presente en el request body.
+> ⚠️ **Regla de seguridad:** Deja `DRY_RUN_DEFAULT=true`. Si `dry_run` se omite en la request, el backend usará ese valor configurado.
 
 ---
 
@@ -244,8 +249,8 @@ curl -X POST http://localhost:8000/api/v1/modifications \
   }'
 ```
 
-El sistema valida la integridad estructural del HTML reconstruido antes de publicar.
-Si la validación falla, **rechaza la publicación** y devuelve `ContentIntegrityError`.
+El sistema valida integridad estructural y política de builder antes de publicar.
+Si la validación falla o el builder es `analysis_only`, **rechaza la publicación** y devuelve error explícito.
 
 ---
 
@@ -259,14 +264,54 @@ Si la validación falla, **rechaza la publicación** y devuelve `ContentIntegrit
 
 ---
 
+## Builders soportados y límites reales
+
+| Builder | Detección | Extracción | Publicación |
+|---|---|---|---|
+| Classic Editor | ✅ | `standard` | ✅ |
+| Gutenberg | ✅ | `standard` | ✅ |
+| Divi | ✅ | `divi_shortcode` | ✅ (con cautela) |
+| Elementor | ✅ | `rendered_html` | ❌ (`analysis_only`) |
+| Oxygen | ✅ | `rendered_html` | ❌ (`analysis_only`) |
+| Breakdance | ✅ | `rendered_html` | ❌ (`analysis_only`) |
+| Bricks | ✅ | `rendered_html` | ❌ (`analysis_only`) |
+
+### Reglas de extraccion builder-aware
+
+Para `elementor`, `oxygen`, `breakdance` y `bricks`, el extractor usa HTML renderizado
+con filtros por builder (no scraping ciego):
+
+- **Detecta y prioriza texto SEO util**: `h1-h6`, `p`, `li`, `blockquote`, `button`, anchors con texto relevante, y `alt` util.
+- **Incluye tabs/acordeones**: extrae texto en wrappers con firmas `tab|accordion|toggle|faq|panel|content`.
+- **Evita ruido tecnico**: elimina `script`, `style`, `iframe`, `form`, `nav`, `header`, `footer`, `aside`.
+- **Evita wrappers no editoriales** con reglas por builder:
+  - Elementor: filtra nav/search/logo widgets, mantiene `elementor-widget-container`.
+  - Oxygen: filtra wrappers de menu/header (`oxy-header`, `ct-menu`, etc.).
+  - Breakdance: filtra clases de menu (`bde-menu`, `bde-mobile-menu`).
+  - Bricks: filtra clases de menu (`bricks-nav-menu`, `bricks-mobile-menu`).
+- **No publica en builders meta-driven**: resultado en `analysis_only` para proteger layout.
+
 ## Limitaciones actuales del MVP
 
-1. **Segmentos con contenido mixto se omiten**: `<p>Texto <strong>negrita</strong></p>` — el `<p>` no se extrae porque tiene elementos hijo. Es conservador por diseño.
+1. **No hay escritura segura en post meta de builders**: Elementor/Oxygen/Breakdance/Bricks siguen en `analysis_only`. Se extrae bien para analisis SEO, pero no se publica via `content.raw`.
 2. **No hay frontend**: La interacción es via API. Se puede usar Swagger UI, curl, Postman o cualquier cliente HTTP.
-3. **Solo un proveedor LLM activo**: Gemini. El sistema está desacoplado para agregar otros fácilmente.
+3. **Solo un proveedor LLM activo**: Gemini. El sistema está desacoplado para agregar otros.
 4. **Los backups son locales**: En `./backups/`. No hay sincronización a S3 ni base de datos.
 5. **Sin rate limiting**: El endpoint no tiene protección contra llamadas masivas.
 6. **Sin autenticación de la API**: El servidor FastAPI no requiere auth. No exponer a internet sin un proxy con autenticación.
+
+### Como probar la extraccion por builder
+
+```bash
+# Deteccion de builder y politica
+.venv\Scripts\python -m pytest tests/unit/test_builder_detector.py -q
+
+# Extraccion builder-aware desde HTML renderizado
+.venv\Scripts\python -m pytest tests/unit/test_rendered_html_extractor.py -q
+
+# Flujo completo del caso de uso (orquestacion + guardas)
+.venv\Scripts\python -m pytest tests/unit/test_modify_page_usecase.py -q
+```
 
 ---
 

@@ -248,13 +248,14 @@ class BuilderDetector:
         print(report.builder_type, report.confidence, report.publish_allowed)
     """
 
-    def detect(self, raw_content: str) -> ExtractionReport:
+    def detect(self, raw_content: str, rendered_content: str = "") -> ExtractionReport:
         """
-        Analiza raw_content y retorna un ExtractionReport completo.
+        Analiza raw_content y rendered_content y retorna un ExtractionReport completo.
 
         Args:
             raw_content: El contenido crudo obtenido de la REST API de WP.
                          Puede ser shortcodes (Divi, Oxygen...) o HTML.
+            rendered_content: El HTML renderizado devuelto por the_content via REST API.
 
         Returns:
             ExtractionReport con builder_type, confidence, policy_decision,
@@ -264,8 +265,10 @@ class BuilderDetector:
         scores: dict[BuilderType, float] = {b: 0.0 for b in BuilderType}
         signals_fired: list[str] = []
 
+        combined_content = f"{raw_content}\n\n{rendered_content}"
+
         for signal in _SIGNALS:
-            if signal.pattern.search(raw_content):
+            if signal.pattern.search(combined_content):
                 scores[signal.builder] += signal.weight
                 signals_fired.append(signal.description)
 

@@ -19,6 +19,7 @@ from src.application.use_cases.modify_page import ModifyPageUseCase
 from src.domain.entities import (
     EditableSegment,
     ModificationStatus,
+    OperationMode,
     PageContent,
     ProtectedContent,
     ValidationResult,
@@ -254,6 +255,8 @@ class TestNoSegments:
 
         assert result.segments_found == 0
         assert result.segments_modified == 0
+        assert result.status == ModificationStatus.DRY_RUN
+        assert result.operation_mode == OperationMode.BLOCKED_NO_CONTENT
         assert len(result.warnings) > 0
         mocks["llm"].transform_segments.assert_not_called()
         mocks["wp"].update_page.assert_not_called()
@@ -345,6 +348,32 @@ class TestGuards:
         result = await uc.execute("42", "amplía", dry_run=True)
 
         assert "250%" in result.warnings[0]
+
+    async def test_analysis_only_builder_blocks_apply(
+        self, sample_page, protected_content, modified_segments
+    ):
+        page = PageContent(
+            page_id=sample_page.page_id,
+            slug=sample_page.slug,
+            title=sample_page.title,
+            raw_content='<!-- Elementor:{"id":"abc","version":"3.24.0"} -->',
+            rendered_content='<div class="elementor-section"><h2>Titulo suficientemente largo para extraer</h2></div>',
+            url=sample_page.url,
+            last_modified=sample_page.last_modified,
+            content_type=sample_page.content_type,
+        )
+        uc, mocks = _build_use_case(page, protected_content, modified_segments)
+
+        with pytest.raises(ContentIntegrityError, match="Publishing is blocked"):
+            await uc.execute("42", "optimiza", dry_run=False)
+        mocks["wp"].update_page.assert_not_called()
+
+    async def test_operation_mode_safe_apply_for_supported_builders(
+        self, sample_page, protected_content, modified_segments
+    ):
+        uc, _ = _build_use_case(sample_page, protected_content, modified_segments)
+        result = await uc.execute("42", "optimiza", dry_run=True)
+        assert result.operation_mode == OperationMode.SAFE_APPLY
 
 
 # ── Tests: Resilencia del Log ──────────────────────────────────────────────────

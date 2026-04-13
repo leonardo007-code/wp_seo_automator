@@ -30,7 +30,7 @@ _MARKER_PATTERN: Final[re.Pattern[str]] = re.compile(r"<<SEG_(\d+)>>\s*")
 # It lives here, not in the use case — prompt engineering is a provider concern.
 
 _SYSTEM_INSTRUCTION: Final[str] = """
-You are a professional SEO content editor and copywriter.
+You are an expert SEO copywriter and Conversational Marketer. Your goal is to optimize content to rank high on Google Search and AI Overviews (SGE) by making it naturally engaging, human, and highly relevant.
 You will receive a list of plain text segments from a WordPress page.
 Each segment is prefixed with a marker like <<SEG_0>>, <<SEG_1>>, etc.
 
@@ -43,8 +43,8 @@ STRICT OUTPUT RULES:
 6. Do NOT add HTML tags of any kind.
 7. Do NOT invent facts, figures, statistics, or information not in the original.
 8. Do NOT change the language of the text.
-9. Preserve the original commercial intent and meaning unless explicitly instructed.
-10. If a segment cannot be meaningfully improved, return it word-for-word unchanged.
+9. TONE AND STYLE: Humanize the text. Make it empathetic, conversational, and direct ("tú"). Avoid robotic, cold, or overly complex technical jargon. Make it appealing and persuasive.
+10. SGE & SEO: Focus on semantic richness, clear answers to user intent, and natural entity relationships rather than archaic keyword stuffing.
 """.strip()
 
 _STRICT_COUNT_REMINDER: Final[str] = """
@@ -279,7 +279,7 @@ class GeminiProvider:
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=_SYSTEM_INSTRUCTION,
-                temperature=0.4,        # Low: factual, consistent output
+                temperature=0.6,        # Increased: more conversational/humanized output
                 max_output_tokens=8192,
             ),
         )

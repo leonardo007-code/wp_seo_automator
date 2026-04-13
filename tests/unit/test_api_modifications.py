@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.dependencies import get_modify_page_use_case
+from src.config.settings import get_settings
 from src.domain.entities import ModificationResult, ModificationStatus
 from src.domain.exceptions import (
     ContentIntegrityError,
@@ -117,6 +118,7 @@ class TestPostModifications:
             "dry_run", "segments_found", "segments_modified",
             "diff_summary", "backup_path", "original_content",
             "proposed_content", "warnings", "errors", "created_at",
+            "operation_mode",
         ]
         for field in required_fields:
             assert field in data, f"Missing field: {field}"
@@ -198,6 +200,24 @@ class TestRequestValidation:
 
         call_kwargs = mock_use_case.execute.call_args[1]
         assert call_kwargs["dry_run"] is True
+
+    def test_dry_run_uses_settings_default_when_omitted(self, mock_use_case):
+        from src.main import app
+
+        class _FakeSettings:
+            dry_run_default = False
+
+        app.dependency_overrides[get_modify_page_use_case] = lambda: mock_use_case
+        app.dependency_overrides[get_settings] = lambda: _FakeSettings()
+        try:
+            with patch("google.genai.Client"):
+                with TestClient(app, raise_server_exceptions=False) as c:
+                    body = {"identifier": "servicios", "instructions": "Mejora el contenido SEO."}
+                    c.post("/api/v1/modifications", json=body)
+            call_kwargs = mock_use_case.execute.call_args[1]
+            assert call_kwargs["dry_run"] is False
+        finally:
+            app.dependency_overrides.clear()
 
 
 # ── Tests: Exception Handling ──────────────────────────────────────────────────

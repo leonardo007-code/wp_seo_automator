@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, status
 from src.api.dependencies import get_modify_page_use_case
 from src.api.schemas import ModifyPageRequest, ModifyPageResponse
 from src.application.use_cases.modify_page import ModifyPageUseCase
+from src.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,18 @@ configured LLM provider (default: Gemini).
 async def modify_page(
     body: ModifyPageRequest,
     use_case: ModifyPageUseCase = Depends(get_modify_page_use_case),
+    settings: Settings = Depends(get_settings),
 ) -> ModifyPageResponse:
+    effective_dry_run = (
+        settings.dry_run_default
+        if body.dry_run is None
+        else body.dry_run
+    )
     logger.info(
         "POST /modifications received",
         extra={
             "identifier": body.identifier,
-            "dry_run": body.dry_run,
+            "dry_run": effective_dry_run,
             "instructions_preview": body.instructions[:60],
         },
     )
@@ -54,7 +61,7 @@ async def modify_page(
     result = await use_case.execute(
         identifier=body.identifier,
         instructions=body.instructions,
-        dry_run=body.dry_run,
+        dry_run=effective_dry_run,
     )
 
     return ModifyPageResponse.from_domain(result)

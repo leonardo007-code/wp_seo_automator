@@ -30,6 +30,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Forzar UTF-8 en stdout para Windows (evita UnicodeEncodeError con CP1252)
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
 
 # ── Colores ANSI ───────────────────────────────────────────────────────────────
 GREEN = "\033[92m"
@@ -50,6 +55,24 @@ def _fail(msg: str) -> None:
 
 def _warn(msg: str) -> None:
     print(f"  {YELLOW}⚠{RESET} {msg}")
+
+
+def _format_http_exception(exc: BaseException) -> str:
+    """Evita mensajes vacíos (algunas excepciones de httpx tienen str() == '')."""
+    msg = str(exc).strip()
+    parts: list[str] = [type(exc).__name__]
+    if msg:
+        parts.append(msg)
+    elif getattr(exc, "args", None):
+        parts.append(repr(exc.args))
+    req = getattr(exc, "request", None)
+    if req is not None and getattr(req, "url", None) is not None:
+        parts.append(f"URL={req.url}")
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if cause is not None and cause is not exc:
+        cmsg = str(cause).strip() or repr(cause)
+        parts.append(f"causa={type(cause).__name__}: {cmsg}")
+    return " — ".join(parts) if len(parts) > 1 else parts[0]
 
 
 def _section(title: str) -> None:
@@ -125,30 +148,91 @@ async def check_wordpress() -> bool:
         return False
 
     import httpx
+    attempts = 3
+
+    async def _get_with_retries(
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        params: dict[str, object] | None = None,
+        stage: str = "request",
+    ) -> httpx.Response:
+        last_exc: BaseException | None = None
+        for idx in range(1, attempts + 1):
+            try:
+                return await client.get(url, params=params)
+            except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.TimeoutException, httpx.RequestError) as exc:
+                last_exc = exc
+                if idx == attempts:
+                    raise
+                _warn(
+                    f"{stage}: intento {idx}/{attempts} falló ({_format_http_exception(exc)}). "
+                    "Reintentando..."
+                )
+                await asyncio.sleep(0.6 * idx)
+        if last_exc:
+            raise last_exc
+        raise RuntimeError(f"{stage}: fallo sin excepción capturada")
 
     # 2a. Conectividad de red pública (sin autenticación)
     api_url = f"{settings.wp_base_url}/wp-json/wp/v2"
     try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as http:
-            resp = await http.get(api_url)
+        # http2=False: algunos hosts/proxies cerraban la conexión con HTTP/2.
+        # User-Agent explícito: raros WAF bloquean clientes sin UA reconocible.
+        async with httpx.AsyncClient(
+            timeout=10,
+            follow_redirects=True,
+            http2=False,
+            trust_env=False,
+            headers={
+                "Accept": "application/json, */*;q=0.1",
+                "User-Agent": "WP-SEO-Automator/validate (httpx)",
+                "Connection": "close",
+            },
+        ) as http:
+            resp = await _get_with_retries(
+                http,
+                api_url,
+                stage="Conectividad pública WP",
+            )
         if resp.status_code in (200, 401):
             _ok(f"WordPress REST API accesible: {api_url} → HTTP {resp.status_code}")
         else:
             _fail(f"WordPress devolvió HTTP {resp.status_code} para {api_url}")
             return False
     except httpx.ConnectError as e:
-        _fail(f"No se puede conectar a WordPress: {e}")
+        _fail(f"No se puede conectar a WordPress: {_format_http_exception(e)}")
         _warn("Verifica que WP_BASE_URL sea correcto y que el servidor esté activo.")
         return False
+    except httpx.RemoteProtocolError as e:
+        _fail(f"El servidor cerró la conexión sin respuesta HTTP: {_format_http_exception(e)}")
+        _warn(
+            "Suele deberse al hosting, proxy, firewall, WAF, SSL o plugins de seguridad — "
+            "no a que WP_BASE_URL esté mal escrito. Prueba la misma URL en el navegador; "
+            "revisa logs del servidor y reglas de seguridad."
+        )
+        return False
+    except httpx.TimeoutException as e:
+        _fail(f"Tiempo de espera agotado al contactar WordPress: {_format_http_exception(e)}")
+        _warn("El host no respondió a tiempo. Revisa red, firewall o carga del servidor.")
+        return False
+    except httpx.RequestError as e:
+        _fail(f"Error HTTP al contactar WordPress: {_format_http_exception(e)}")
+        return False
     except Exception as e:
-        _fail(f"Error de red inesperado: {e}")
+        _fail(f"Error de red inesperado: {_format_http_exception(e)}")
         return False
 
     # 2b. Autenticación con Application Password
     client = WpRestClient(settings)
     try:
         pages_url = f"{settings.wp_base_url}/wp-json/wp/v2/pages"
-        resp = await client._http.get(pages_url, params={"context": "edit", "per_page": 3})
+        resp = await _get_with_retries(
+            client._http,
+            pages_url,
+            params={"context": "edit", "per_page": 3},
+            stage="Autenticación WP",
+        )
         if resp.status_code == 200:
             pages = resp.json()
             _ok(f"Autenticación exitosa. Páginas encontradas: {len(pages)}")
@@ -165,7 +249,7 @@ async def check_wordpress() -> bool:
             _fail(f"Respuesta inesperada de WordPress: HTTP {resp.status_code}")
             return False
     except Exception as e:
-        _fail(f"Error autenticando con WordPress: {e}")
+        _fail(f"Error autenticando con WordPress: {_format_http_exception(e)}")
         return False
     finally:
         await client.close()

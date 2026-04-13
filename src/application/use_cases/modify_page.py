@@ -34,6 +34,7 @@ from src.domain.entities import (
     ExtractionReport,
     ModificationResult,
     ModificationStatus,
+    OperationMode,
     PolicyDecision,
 )
 from src.domain.exceptions import ContentIntegrityError, LLMProviderError
@@ -151,7 +152,10 @@ class ModifyPageUseCase:
         )
 
         # ── Step 4: Detect builder ─────────────────────────────────────────────
-        extraction_report = self._builder_detector.detect(page.raw_content)
+        extraction_report = self._builder_detector.detect(
+            raw_content=page.raw_content,
+            rendered_content=page.rendered_content,
+        )
 
         logger.info(
             "Builder detected",
@@ -309,6 +313,11 @@ class ModifyPageUseCase:
             warnings=all_warnings,
             errors=[],
             extraction_report=extraction_report,
+            operation_mode=(
+                OperationMode.SAFE_APPLY
+                if extraction_report.publish_allowed
+                else OperationMode.ANALYSIS_ONLY
+            ),
         )
 
         await self._save_audit_log(result, html_diff=html_diff)
@@ -357,7 +366,18 @@ class ModifyPageUseCase:
 
         elif mode == ExtractionMode.RENDERED_HTML:
             # ── Elementor/Oxygen/Breakdance/Bricks: extraer del HTML público ─
-            segments = await self._rendered_extractor.extract_from_url(page.url)
+            if getattr(page, "rendered_content", ""):
+                logger.info("Using rendered_content from API for extraction", extra={"page_id": page.page_id})
+                segments = self._rendered_extractor.extract_from_html(
+                    page.rendered_content,
+                    builder_type=extraction_report.builder_type,
+                )
+            else:
+                logger.info("rendered_content missing, falling back to public URL", extra={"page_id": page.page_id})
+                segments = await self._rendered_extractor.extract_from_url(
+                    page.url,
+                    builder_type=extraction_report.builder_type,
+                )
             self._last_standard_protected = None
             self._last_divi_protected = None
             self._last_token_map = {}
@@ -370,11 +390,33 @@ class ModifyPageUseCase:
             return segments, page.raw_content, None, warnings
 
         else:
-            # ── NONE / UNKNOWN: sin extracción posible ───────────────────────
+            # ── NONE / UNKNOWN: fallback conservador a HTML renderizado ──────
             self._last_standard_protected = None
             self._last_divi_protected = None
             self._last_token_map = {}
-            return [], page.raw_content, None, warnings
+            if getattr(page, "rendered_content", ""):
+                logger.info(
+                    "Unknown builder fallback to rendered_content extraction",
+                    extra={"page_id": page.page_id},
+                )
+                segments = self._rendered_extractor.extract_from_html(
+                    page.rendered_content,
+                    builder_type=extraction_report.builder_type,
+                )
+            else:
+                logger.info(
+                    "Unknown builder fallback to public URL extraction",
+                    extra={"page_id": page.page_id},
+                )
+                segments = await self._rendered_extractor.extract_from_url(
+                    page.url,
+                    builder_type=extraction_report.builder_type,
+                )
+            warnings.append(
+                "Builder detection is ambiguous. Falling back to rendered HTML "
+                "analysis mode. Publishing remains blocked for safety."
+            )
+            return segments, page.raw_content, None, warnings
 
     def _reconstruct(
         self,
@@ -440,7 +482,7 @@ class ModifyPageUseCase:
             page_id=page_id,
             page_url=page.url,
             instruction=instructions,
-            status=ModificationStatus.SUCCESS,
+            status=ModificationStatus.DRY_RUN if dry_run else ModificationStatus.FAILED,
             dry_run=dry_run,
             segments_found=0,
             segments_modified=0,
@@ -451,6 +493,7 @@ class ModifyPageUseCase:
             warnings=[warning_msg],
             errors=[],
             extraction_report=extraction_report,
+            operation_mode=OperationMode.BLOCKED_NO_CONTENT,
         )
 
     # ── Private: Audit logging ────────────────────────────────────────────────

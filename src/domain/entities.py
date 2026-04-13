@@ -56,6 +56,22 @@ class PolicyDecision(str, Enum):
     BLOCKED = "blocked"
 
 
+class OperationMode(str, Enum):
+    """
+    Modo operativo final de la ejecución (casos funcionales del negocio).
+
+    SAFE_APPLY:
+        Hay segmentos editables y la política permite publicar.
+    ANALYSIS_ONLY:
+        Hay segmentos útiles para análisis/preview, pero publicar está bloqueado.
+    BLOCKED_NO_CONTENT:
+        No hay segmentos útiles o el caso es demasiado ambiguo para operar.
+    """
+    SAFE_APPLY = "safe_apply"
+    ANALYSIS_ONLY = "analysis_only"
+    BLOCKED_NO_CONTENT = "blocked_no_content"
+
+
 @dataclass
 class ExtractionReport:
     """
@@ -146,6 +162,7 @@ class PageContent:
     url: str
     last_modified: str
     content_type: str = "page"
+    rendered_content: str = ""
 
 
 @dataclass
@@ -192,5 +209,6 @@ class ModificationResult:
     warnings: list[str]
     errors: list[str]
     extraction_report: ExtractionReport = field(default_factory=ExtractionReport)
+    operation_mode: OperationMode = OperationMode.BLOCKED_NO_CONTENT
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

@@ -31,9 +31,12 @@ class ModifyPageRequest(BaseModel):
             "Reescribe con mayor claridad y concisión.",
         ],
     )
-    dry_run: bool = Field(
-        default=True,
-        description="Si True, devuelve el resultado sin publicar en WordPress.",
+    dry_run: bool | None = Field(
+        default=None,
+        description=(
+            "Si True, devuelve el resultado sin publicar en WordPress. "
+            "Si se omite, usa DRY_RUN_DEFAULT de configuración."
+        ),
     )
 
     @field_validator("instructions", mode="before")
@@ -90,6 +93,7 @@ class ModifyPageResponse(BaseModel):
     confidence: float = 0.0
     publish_allowed: bool = False
     publish_blocked_reason: str = ""
+    operation_mode: str = "blocked_no_content"
 
     @classmethod
     def from_domain(cls, result: ModificationResult) -> ModifyPageResponse:
@@ -115,6 +119,7 @@ class ModifyPageResponse(BaseModel):
             confidence=report.confidence,
             publish_allowed=report.publish_allowed,
             publish_blocked_reason=report.publish_blocked_reason,
+            operation_mode=result.operation_mode.value,
         )
 
 

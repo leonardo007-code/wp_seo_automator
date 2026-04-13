@@ -51,6 +51,14 @@ class WpRestClient:
             auth=auth,
             timeout=settings.request_timeout_seconds,
             follow_redirects=True,
+            http2=False,
+            trust_env=False,
+            headers={
+                "Accept": "application/json, */*;q=0.1",
+                "User-Agent": "WP-SEO-Automator/1.0 (httpx)",
+                # Algunos proxies/hosts cierran keep-alive con Basic Auth.
+                "Connection": "close",
+            },
         )
 
     async def close(self) -> None:
@@ -245,6 +253,7 @@ class WpRestClient:
         or without the edit context.
         """
         raw = data.get("content", {}).get("raw", "")
+        rendered = data.get("content", {}).get("rendered", "")
         if not raw:
             logger.warning(
                 "content.raw is empty — request may lack context=edit or authentication",
@@ -259,6 +268,7 @@ class WpRestClient:
             url=data.get("link", ""),
             last_modified=data.get("modified", ""),
             content_type="page" if content_type == "pages" else "post",
+            rendered_content=rendered,
         )
 
     @staticmethod
